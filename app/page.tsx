@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
 
 // 官方 LINE 與 IG 設定
@@ -8,6 +8,13 @@ const OFFICIAL_LINE_ID = "@250mykon";
 const OFFICIAL_LINE_URL = `https://line.me/R/ti/p/${OFFICIAL_LINE_ID}`;
 const INSTAGRAM_HANDLE = "akunarch";
 const INSTAGRAM_URL = `https://instagram.com/${INSTAGRAM_HANDLE}`;
+
+// 原價設定
+const BASE_SERVICES = [
+  { name: '野生眉（熱門首選）', originalPrice: 6800, note: '1. 客製眉型設計 2. 術後保養包 3. 三個月內免費補色一次' },
+  { name: '純飄眉（入門體驗）', originalPrice: 4500, note: '1. 客製眉型設計 2. 術後保養包 （▲不含補色）' },
+  { name: '一年內補色', originalPrice: 3800, note: '1. 客製眉型調整 2. 術後保養包 （▲限本店舊客）' },
+];
 
 // 第一步：預約基本資料
 interface BookingInfo {
@@ -68,13 +75,6 @@ export default function BookingPage() {
   const sigCanvas = useRef<SignatureCanvas>(null);
   const [copiedLine, setCopiedLine] = useState(false);
 
-  // 價目表服務項目清單
-  const serviceOptions = [
-    { label: '野生眉（熱門首選） - NT$ 6,800', value: '野生眉 (NT$6,800)' },
-    { label: '純飄眉（入門體驗） - NT$ 4,500', value: '純飄眉 (NT$4,500)' },
-    { label: '一年內補色 - NT$ 3,800 (限本店舊客)', value: '一年內補色 (NT$3,800)' },
-  ];
-
   // 步驟一狀態
   const [bookingData, setBookingData] = useState<BookingInfo>({
     name: '',
@@ -82,7 +82,7 @@ export default function BookingPage() {
     lineId: '',
     birthday: '',
     isBirthdayMonth: '否',
-    service: '野生眉 (NT$6,800)',
+    service: '',
     isFirstTime: '是',
     date1: '',
     timeSlot1: '',
@@ -94,6 +94,41 @@ export default function BookingPage() {
     sourceDetail: '',
     note: '',
   });
+
+  // 計算價格選單（根據是否壽星）
+  const getServiceOptions = (isBirthday: boolean) => {
+    return BASE_SERVICES.map((item) => {
+      const finalPrice = isBirthday
+        ? Math.round(item.originalPrice * 0.9)
+        : item.originalPrice;
+      const label = isBirthday
+        ? `${item.name} - 壽星價 NT$ ${finalPrice.toLocaleString()} (原價 NT$ ${item.originalPrice.toLocaleString()})`
+        : `${item.name} - NT$ ${finalPrice.toLocaleString()}`;
+      const value = `${item.name} (NT$ ${finalPrice.toLocaleString()}${isBirthday ? ' 壽星9折' : ''})`;
+      return { ...item, finalPrice, label, value };
+    });
+  };
+
+  const currentServiceOptions = getServiceOptions(bookingData.isBirthdayMonth === '是');
+
+  // 當選擇壽星切換時，自動更新預約項目的顯示文字與價格
+  useEffect(() => {
+    if (!bookingData.service) {
+      setBookingData((prev) => ({ ...prev, service: currentServiceOptions[0].value }));
+      return;
+    }
+
+    // 找到當前選中的服務基礎名稱
+    const matchedService = BASE_SERVICES.find((s) => bookingData.service.includes(s.name));
+    if (matchedService) {
+      const isBirthday = bookingData.isBirthdayMonth === '是';
+      const finalPrice = isBirthday
+        ? Math.round(matchedService.originalPrice * 0.9)
+        : matchedService.originalPrice;
+      const newServiceValue = `${matchedService.name} (NT$ ${finalPrice.toLocaleString()}${isBirthday ? ' 壽星9折' : ''})`;
+      setBookingData((prev) => ({ ...prev, service: newServiceValue }));
+    }
+  }, [bookingData.isBirthdayMonth]);
 
   // 步驟二狀態
   const [healthData, setHealthData] = useState<HealthInfo>({
@@ -249,6 +284,9 @@ export default function BookingPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // 當前選中的服務說明卡片
+  const activeServiceInfo = currentServiceOptions.find((s) => bookingData.service.includes(s.name));
+
   return (
     <main className="min-h-screen bg-[#F4F7F4] py-12 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-sm p-8 sm:p-10 rounded-3xl shadow-sm border border-[#E2EBE2]">
@@ -284,7 +322,7 @@ export default function BookingPage() {
           </div>
         )}
 
-        {/* ================= 步驟一：預約資訊 (包含價格與當月壽星) ================= */}
+        {/* ================= 步驟一：預約資訊 (包含動態壽星 9 折) ================= */}
         {step === 1 && (
           <form
             onSubmit={(e) => {
@@ -364,7 +402,7 @@ export default function BookingPage() {
 
                 <div className="p-3 rounded-xl bg-[#F0F5F0] border border-[#D8E5D9]">
                   <label className="block text-xs font-medium text-[#3D4D3E] mb-1.5">
-                    🎂 是否為當月壽星？ <span className="text-[#5B7B5E] font-semibold">(享 9 折優惠)</span>
+                    🎂 是否為當月壽星？ <span className="text-[#5B7B5E] font-semibold">(自動套用 9 折價格)</span>
                   </label>
                   <div className="flex gap-6">
                     <label className="flex items-center gap-2 cursor-pointer text-xs text-[#4A574B]">
@@ -394,7 +432,7 @@ export default function BookingPage() {
               </div>
             </div>
 
-            {/* 2. 預約內容選擇與價目 */}
+            {/* 2. 預約內容選擇與動態價目 */}
             <div className="space-y-4 pt-2">
               <h2 className="text-sm font-semibold text-[#5B7B5E] border-b border-[#E2EBE2] pb-1.5 mb-3">
                 2. 預約項目選擇與價目
@@ -410,7 +448,7 @@ export default function BookingPage() {
                   onChange={handleBookingChange}
                   className="w-full px-4 py-2.5 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-[#2D3B2E] text-sm focus:ring-2 focus:ring-[#8BA88D] outline-none"
                 >
-                  {serviceOptions.map((item) => (
+                  {currentServiceOptions.map((item) => (
                     <option key={item.value} value={item.value}>
                       {item.label}
                     </option>
@@ -418,24 +456,23 @@ export default function BookingPage() {
                 </select>
               </div>
 
-              {bookingData.service.includes('野生眉') && (
+              {/* 展示服務詳情與當前結算價格 */}
+              {activeServiceInfo && (
                 <div className="p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-xs text-[#687869] space-y-1">
-                  <p className="font-semibold text-[#5B7B5E]">✨ 野生眉服務包含：</p>
-                  <p>1. 客製眉型設計  2. 術後保養包  3. 三個月內免費補色一次</p>
-                </div>
-              )}
-
-              {bookingData.service.includes('純飄眉') && (
-                <div className="p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-xs text-[#687869] space-y-1">
-                  <p className="font-semibold text-[#5B7B5E]">✨ 純飄眉服務包含：</p>
-                  <p>1. 客製眉型設計  2. 術後保養包 （▲不含補色）</p>
-                </div>
-              )}
-
-              {bookingData.service.includes('補色') && (
-                <div className="p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-xs text-[#687869] space-y-1">
-                  <p className="font-semibold text-[#5B7B5E]">✨ 一年內補色服務：</p>
-                  <p>1. 客製眉型調整  2. 術後保養包 （▲限本店操作客戶）</p>
+                  <div className="flex justify-between items-center border-b border-[#E2EBE2] pb-1">
+                    <p className="font-semibold text-[#5B7B5E]">✨ {activeServiceInfo.name}</p>
+                    <p className="font-bold text-[#2D3B2E]">
+                      {bookingData.isBirthdayMonth === '是' ? (
+                        <>
+                          <span className="line-through text-gray-400 mr-1.5">NT$ {activeServiceInfo.originalPrice.toLocaleString()}</span>
+                          <span className="text-red-600 font-extrabold">壽星價 NT$ {activeServiceInfo.finalPrice.toLocaleString()}</span>
+                        </>
+                      ) : (
+                        `NT$ ${activeServiceInfo.finalPrice.toLocaleString()}`
+                      )}
+                    </p>
+                  </div>
+                  <p className="pt-1">{activeServiceInfo.note}</p>
                 </div>
               )}
 
@@ -1086,7 +1123,7 @@ export default function BookingPage() {
           </form>
         )}
 
-        {/* ================= 步驟六：預約成功 (官方 LINE + IG: @akunarch) ================= */}
+        {/* ================= 步驟六：預約成功 ================= */}
         {step === 6 && (
           <div className="text-center py-4 space-y-6">
             <div className="w-16 h-16 bg-[#E8F0E8] text-[#5B7B5E] rounded-full flex items-center justify-center mx-auto text-3xl font-semibold shadow-inner">
@@ -1104,7 +1141,7 @@ export default function BookingPage() {
             <div className="bg-[#FAFBF9] p-4 rounded-2xl border border-[#DCE4DC] text-left max-w-md mx-auto text-xs space-y-2">
               <p className="font-semibold text-[#5B7B5E] border-b border-[#E2EBE2] pb-1">預約摘要</p>
               <p><span className="text-[#7A8A7B]">預約項目：</span>{bookingData.service}</p>
-              <p><span className="text-[#7A8A7B]">當月壽星：</span>{bookingData.isBirthdayMonth === '是' ? '🎂 是 (享 9 折優惠)' : '否'}</p>
+              <p><span className="text-[#7A8A7B]">當月壽星：</span>{bookingData.isBirthdayMonth === '是' ? '🎂 是 (已套用 9 折優惠)' : '否'}</p>
               <p><span className="text-[#7A8A7B]">首選日期/時段：</span>{bookingData.date1} {bookingData.timeSlot1}</p>
             </div>
 
