@@ -3,9 +3,11 @@
 import { useState, useRef } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
 
-// 請在下方替換為你的真實 LINE 官方帳號資訊
-const OFFICIAL_LINE_ID = "@kmarch"; // 例如: @kmarch
-const OFFICIAL_LINE_URL = "https://line.me/R/ti/p/@kmarch"; // 替換為你的 LINE 官方帳號連結
+// 官方 LINE 與 IG 設定
+const OFFICIAL_LINE_ID = "@250mykon"; 
+const OFFICIAL_LINE_URL = `https://line.me/R/ti/p/${OFFICIAL_LINE_ID}`;
+const INSTAGRAM_HANDLE = "akunarch";
+const INSTAGRAM_URL = `https://instagram.com/${INSTAGRAM_HANDLE}`;
 
 // 第一步：預約基本資料
 interface BookingInfo {
@@ -13,6 +15,7 @@ interface BookingInfo {
   phone: string;
   lineId: string;
   birthday: string;
+  isBirthdayMonth: string; // 是否為當月壽星
   service: string;
   isFirstTime: string;
   date1: string;
@@ -63,7 +66,14 @@ interface ConsentInfo {
 export default function BookingPage() {
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const sigCanvas = useRef<SignatureCanvas>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedLine, setCopiedLine] = useState(false);
+
+  // 價目表服務項目清單
+  const serviceOptions = [
+    { label: '野生眉（熱門首選） - NT$ 6,800', value: '野生眉 (NT$6,800)' },
+    { label: '純飄眉（入門體驗） - NT$ 4,500', value: '純飄眉 (NT$4,500)' },
+    { label: '一年內補色 - NT$ 3,800 (限本店舊客)', value: '一年內補色 (NT$3,800)' },
+  ];
 
   // 步驟一狀態
   const [bookingData, setBookingData] = useState<BookingInfo>({
@@ -71,7 +81,8 @@ export default function BookingPage() {
     phone: '',
     lineId: '',
     birthday: '',
-    service: '紋眉',
+    isBirthdayMonth: '否',
+    service: '野生眉 (NT$6,800)',
     isFirstTime: '是',
     date1: '',
     timeSlot1: '',
@@ -131,17 +142,18 @@ export default function BookingPage() {
   ];
 
   const conditionOptions = [
+    '無',
     '懷孕', '糖尿病', '心臟病', '高血壓', '蟹足腫', '過敏體質',
     '每週喝酒3天以上', '賀爾蒙失調', '甲狀腺',
     '眉毛區塊皮膚疾病（毛囊炎、痘痘、濕疹、異位性皮膚炎）',
     'B型肝炎', '蕁麻疹', '貧血', '愛滋病', '癲癇', '免疫力下降',
     '切眉', '做過雷射洗眉', '做過除色',
     '曾經做過眉毛紋繡（包含紋眉、繡眉、飄眉、霧眉、纖霧眉等等）',
-    '月經期間', '月經前七天', '無'
+    '月經期間', '月經前七天'
   ];
 
-  const medicationOptions = ['中藥', '西藥', '抗凝血藥物', '無'];
-  const productOptions = ['A酸', 'A醇', '換膚產品', '無'];
+  const medicationOptions = ['無', '中藥', '西藥', '抗凝血藥物'];
+  const productOptions = ['無', 'A酸', 'A醇', '換膚產品'];
 
   const makeupHabitOptions = [
     '完全不化妝',
@@ -197,14 +209,12 @@ export default function BookingPage() {
     setConsentData((prev) => ({ ...prev, signatureImage: '' }));
   };
 
-  // 複製 LINE ID 功能
   const copyLineId = () => {
     navigator.clipboard.writeText(OFFICIAL_LINE_ID);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedLine(true);
+    setTimeout(() => setCopiedLine(false), 2000);
   };
 
-  // 最終提交預約單，並跳轉至第 6 步
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -243,7 +253,6 @@ export default function BookingPage() {
     <main className="min-h-screen bg-[#F4F7F4] py-12 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-sm p-8 sm:p-10 rounded-3xl shadow-sm border border-[#E2EBE2]">
         
-        {/* 標題 (1-5步顯示) */}
         {step !== 6 && (
           <div className="mb-6 text-center">
             <span className="text-xs font-semibold tracking-widest text-[#5B7B5E] uppercase bg-[#E8F0E8] px-3.5 py-1.5 rounded-full inline-block mb-3">
@@ -255,7 +264,6 @@ export default function BookingPage() {
           </div>
         )}
 
-        {/* 步驟進度條 (1-5步顯示) */}
         {step !== 6 && (
           <div className="flex items-center justify-center mb-8 gap-1 sm:gap-2">
             {[1, 2, 3, 4, 5].map((num) => (
@@ -276,7 +284,7 @@ export default function BookingPage() {
           </div>
         )}
 
-        {/* ================= 步驟一：預約資訊 ================= */}
+        {/* ================= 步驟一：預約資訊 (包含價格與當月壽星) ================= */}
         {step === 1 && (
           <form
             onSubmit={(e) => {
@@ -338,24 +346,58 @@ export default function BookingPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-[#4A574B] mb-1.5">
-                  生日 <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="date"
-                  name="birthday"
-                  required
-                  value={bookingData.birthday}
-                  onChange={handleBookingChange}
-                  className="w-full px-4 py-2.5 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-[#2D3B2E] text-sm focus:ring-2 focus:ring-[#8BA88D] outline-none"
-                />
+              {/* 生日與當月壽星優惠勾選 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+                <div>
+                  <label className="block text-xs font-medium text-[#4A574B] mb-1.5">
+                    生日 <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    name="birthday"
+                    required
+                    value={bookingData.birthday}
+                    onChange={handleBookingChange}
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-[#2D3B2E] text-sm focus:ring-2 focus:ring-[#8BA88D] outline-none"
+                  />
+                </div>
+
+                <div className="p-3 rounded-xl bg-[#F0F5F0] border border-[#D8E5D9]">
+                  <label className="block text-xs font-medium text-[#3D4D3E] mb-1.5">
+                    🎂 是否為當月壽星？ <span className="text-[#5B7B5E] font-semibold">(享 9 折優惠)</span>
+                  </label>
+                  <div className="flex gap-6">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-[#4A574B]">
+                      <input
+                        type="radio"
+                        name="isBirthdayMonth"
+                        value="是"
+                        checked={bookingData.isBirthdayMonth === '是'}
+                        onChange={handleBookingChange}
+                        className="accent-[#5B7B5E]"
+                      />
+                      是，當月壽星 🎂
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-[#4A574B]">
+                      <input
+                        type="radio"
+                        name="isBirthdayMonth"
+                        value="否"
+                        checked={bookingData.isBirthdayMonth === '否'}
+                        onChange={handleBookingChange}
+                        className="accent-[#5B7B5E]"
+                      />
+                      否
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
 
+            {/* 2. 預約內容選擇與價目 */}
             <div className="space-y-4 pt-2">
               <h2 className="text-sm font-semibold text-[#5B7B5E] border-b border-[#E2EBE2] pb-1.5 mb-3">
-                2. 預約內容選擇
+                2. 預約項目選擇與價目
               </h2>
 
               <div>
@@ -368,42 +410,65 @@ export default function BookingPage() {
                   onChange={handleBookingChange}
                   className="w-full px-4 py-2.5 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-[#2D3B2E] text-sm focus:ring-2 focus:ring-[#8BA88D] outline-none"
                 >
-                  <option value="紋眉">紋眉</option>
-                  <option value="補色">補色</option>
+                  {serviceOptions.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
-              {bookingData.service === '紋眉' && (
-                <div className="p-4 rounded-xl bg-[#F0F5F0] border border-[#D8E5D9]">
-                  <label className="block text-xs font-medium text-[#3D4D3E] mb-2">
-                    是否為第一次體驗紋眉？ <span className="text-red-400">*</span>
-                  </label>
-                  <div className="flex gap-6">
-                    <label className="flex items-center gap-2 cursor-pointer text-sm text-[#4A574B]">
-                      <input
-                        type="radio"
-                        name="isFirstTime"
-                        value="是"
-                        checked={bookingData.isFirstTime === '是'}
-                        onChange={handleBookingChange}
-                        className="accent-[#5B7B5E]"
-                      />
-                      是，第一次
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer text-sm text-[#4A574B]">
-                      <input
-                        type="radio"
-                        name="isFirstTime"
-                        value="否"
-                        checked={bookingData.isFirstTime === '否'}
-                        onChange={handleBookingChange}
-                        className="accent-[#5B7B5E]"
-                      />
-                      否，曾有經驗
-                    </label>
-                  </div>
+              {bookingData.service.includes('野生眉') && (
+                <div className="p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-xs text-[#687869] space-y-1">
+                  <p className="font-semibold text-[#5B7B5E]">✨ 野生眉服務包含：</p>
+                  <p>1. 客製眉型設計  2. 術後保養包  3. 三個月內免費補色一次</p>
                 </div>
               )}
+
+              {bookingData.service.includes('純飄眉') && (
+                <div className="p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-xs text-[#687869] space-y-1">
+                  <p className="font-semibold text-[#5B7B5E]">✨ 純飄眉服務包含：</p>
+                  <p>1. 客製眉型設計  2. 術後保養包 （▲不含補色）</p>
+                </div>
+              )}
+
+              {bookingData.service.includes('補色') && (
+                <div className="p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-xs text-[#687869] space-y-1">
+                  <p className="font-semibold text-[#5B7B5E]">✨ 一年內補色服務：</p>
+                  <p>1. 客製眉型調整  2. 術後保養包 （▲限本店操作客戶）</p>
+                </div>
+              )}
+
+              {/* 是否第一次體驗 */}
+              <div className="p-4 rounded-xl bg-[#F0F5F0] border border-[#D8E5D9]">
+                <label className="block text-xs font-medium text-[#3D4D3E] mb-2">
+                  是否為第一次體驗紋繡/飄眉服務？ <span className="text-red-400">*</span>
+                </label>
+                <div className="flex gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-[#4A574B]">
+                    <input
+                      type="radio"
+                      name="isFirstTime"
+                      value="是"
+                      checked={bookingData.isFirstTime === '是'}
+                      onChange={handleBookingChange}
+                      className="accent-[#5B7B5E]"
+                    />
+                    是，第一次
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-[#4A574B]">
+                    <input
+                      type="radio"
+                      name="isFirstTime"
+                      value="否"
+                      checked={bookingData.isFirstTime === '否'}
+                      onChange={handleBookingChange}
+                      className="accent-[#5B7B5E]"
+                    />
+                    否，曾有經驗
+                  </label>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-4 pt-2">
@@ -578,7 +643,7 @@ export default function BookingPage() {
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC]">
                 {conditionOptions.map((item) => (
-                  <label key={item} className="flex items-center gap-2 text-xs text-[#4A574B] cursor-pointer hover:text-[#2D3B2E]">
+                  <label key={item} className={`flex items-center gap-2 text-xs cursor-pointer hover:text-[#2D3B2E] ${item === '無' ? 'font-bold text-[#5B7B5E] col-span-full pb-1 border-b border-[#E2EBE2]' : 'text-[#4A574B]'}`}>
                     <input
                       type="checkbox"
                       checked={healthData.conditions.includes(item)}
@@ -604,7 +669,7 @@ export default function BookingPage() {
               </label>
               <div className="flex flex-wrap gap-4 p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC]">
                 {medicationOptions.map((item) => (
-                  <label key={item} className="flex items-center gap-2 text-xs text-[#4A574B] cursor-pointer">
+                  <label key={item} className={`flex items-center gap-2 text-xs cursor-pointer ${item === '無' ? 'font-bold text-[#5B7B5E]' : 'text-[#4A574B]'}`}>
                     <input
                       type="checkbox"
                       checked={healthData.medications.includes(item)}
@@ -630,7 +695,7 @@ export default function BookingPage() {
               </label>
               <div className="flex flex-wrap gap-4 p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC]">
                 {productOptions.map((item) => (
-                  <label key={item} className="flex items-center gap-2 text-xs text-[#4A574B] cursor-pointer">
+                  <label key={item} className={`flex items-center gap-2 text-xs cursor-pointer ${item === '無' ? 'font-bold text-[#5B7B5E]' : 'text-[#4A574B]'}`}>
                     <input
                       type="checkbox"
                       checked={healthData.eyebrowProducts.includes(item)}
@@ -1021,7 +1086,7 @@ export default function BookingPage() {
           </form>
         )}
 
-        {/* ================= 步驟六：預約成功與加官方 LINE ================= */}
+        {/* ================= 步驟六：預約成功 (官方 LINE + IG: @akunarch) ================= */}
         {step === 6 && (
           <div className="text-center py-4 space-y-6">
             <div className="w-16 h-16 bg-[#E8F0E8] text-[#5B7B5E] rounded-full flex items-center justify-center mx-auto text-3xl font-semibold shadow-inner">
@@ -1039,10 +1104,11 @@ export default function BookingPage() {
             <div className="bg-[#FAFBF9] p-4 rounded-2xl border border-[#DCE4DC] text-left max-w-md mx-auto text-xs space-y-2">
               <p className="font-semibold text-[#5B7B5E] border-b border-[#E2EBE2] pb-1">預約摘要</p>
               <p><span className="text-[#7A8A7B]">預約項目：</span>{bookingData.service}</p>
+              <p><span className="text-[#7A8A7B]">當月壽星：</span>{bookingData.isBirthdayMonth === '是' ? '🎂 是 (享 9 折優惠)' : '否'}</p>
               <p><span className="text-[#7A8A7B]">首選日期/時段：</span>{bookingData.date1} {bookingData.timeSlot1}</p>
             </div>
 
-            {/* 引導加入官方 LINE 區塊 */}
+            {/* 社群聯絡與追蹤卡片 */}
             <div className="bg-[#F0F5F0] p-6 rounded-2xl border border-[#D8E5D9] max-w-md mx-auto space-y-4">
               <div className="space-y-1">
                 <span className="text-[11px] font-bold tracking-wider text-[#5B7B5E] uppercase bg-white px-2.5 py-1 rounded-full inline-block border border-[#D8E5D9]">
@@ -1050,7 +1116,7 @@ export default function BookingPage() {
                 </span>
                 <h3 className="text-lg font-bold text-[#2D3B2E]">請加入官方 LINE 聯繫預約狀況</h3>
                 <p className="text-xs text-[#687869]">
-                  為確保您的時間能精準對接，請點擊下方按鈕加入官方 LINE 並發送您的姓名，紋繡師將親自為您確認預約。
+                  點擊下方按鈕加入官方 LINE 並發送您的姓名，紋繡師將親自為您確認時間與發放優惠。
                 </p>
               </div>
 
@@ -1067,16 +1133,34 @@ export default function BookingPage() {
                 加入 LINE 官方帳號
               </a>
 
-              {/* 複製 LINE ID 備用選項 */}
-              <div className="pt-2 flex items-center justify-center gap-2 text-xs text-[#687869]">
+              {/* 複製 LINE ID 備用 */}
+              <div className="pt-1 flex items-center justify-center gap-2 text-xs text-[#687869]">
                 <span>LINE ID：<strong className="text-[#2D3B2E]">{OFFICIAL_LINE_ID}</strong></span>
                 <button
                   type="button"
                   onClick={copyLineId}
                   className="px-2.5 py-1 bg-white border border-[#D8E5D9] rounded-md hover:bg-[#E8F0E8] text-[#5B7B5E] transition-all"
                 >
-                  {copied ? '已複製！' : '複製 ID'}
+                  {copiedLine ? '已複製！' : '複製 ID'}
                 </button>
+              </div>
+
+              {/* 追蹤 Instagram 區塊 */}
+              <div className="pt-4 border-t border-[#D8E5D9]">
+                <p className="text-xs text-[#687869] mb-2.5">
+                  觀看更多作品集與最新動態：
+                </p>
+                <a
+                  href={INSTAGRAM_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 px-4 bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#F77737] hover:opacity-95 text-white font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 text-sm"
+                >
+                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                  </svg>
+                  追蹤 Instagram：@{INSTAGRAM_HANDLE}
+                </a>
               </div>
             </div>
 
