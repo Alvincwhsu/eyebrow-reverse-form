@@ -2,28 +2,32 @@
 
 import { useState, useRef, useEffect } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
+import { supabase } from '@/src/lib/supabase';
 
-// 官方 LINE 與 IG 設定
 const OFFICIAL_LINE_ID = "@250mykon"; 
 const OFFICIAL_LINE_URL = `https://line.me/R/ti/p/${OFFICIAL_LINE_ID}`;
 const INSTAGRAM_HANDLE = "akunarch";
 const INSTAGRAM_URL = `https://instagram.com/${INSTAGRAM_HANDLE}`;
 
-// 原價設定
-const BASE_SERVICES = [
-  { name: '野生眉（熱門首選）', originalPrice: 6800, note: '1. 客製眉型設計 2. 術後保養包 3. 三個月內免費補色一次' },
-  { name: '純飄眉（入門體驗）', originalPrice: 4500, note: '1. 客製眉型設計 2. 術後保養包 （▲不含補色）' },
-  { name: '一年內補色', originalPrice: 3800, note: '1. 客製眉型調整 2. 術後保養包 （▲限本店舊客）' },
-];
+interface ServiceItem {
+  id: string;
+  name: string;
+  original_price: number;
+  note: string;
+}
 
-// 第一步：預約基本資料
+interface ConfirmedSlot {
+  confirmed_date: string;
+  confirmed_time_slot: string;
+}
+
 interface BookingInfo {
   name: string;
   phone: string;
   lineId: string;
   birthday: string;
-  isBirthdayMonth: string; // 是否為當月壽星
-  service: string;
+  isBirthdayMonth: string;
+  serviceId: string;
   isFirstTime: string;
   date1: string;
   timeSlot1: string;
@@ -36,7 +40,6 @@ interface BookingInfo {
   note: string;
 }
 
-// 第二步：健康評估資料
 interface HealthInfo {
   conditions: string[];
   conditionOther: string;
@@ -48,7 +51,6 @@ interface HealthInfo {
   scarDetail: string;
 }
 
-// 第三步：顧客意向資料
 interface PreferenceInfo {
   makeupHabit: string;
   makeupHabitOther: string;
@@ -58,12 +60,10 @@ interface PreferenceInfo {
   colorExpectationOther: string;
 }
 
-// 第四步：須知事項條款
 interface TermsInfo {
   agreed: boolean;
 }
 
-// 第五步：顧客同意書與線上簽名
 interface ConsentInfo {
   photoAgreed: boolean;
   signatureImage: string;
@@ -75,6 +75,12 @@ export default function BookingPage() {
   const sigCanvas = useRef<SignatureCanvas>(null);
   const [copiedLine, setCopiedLine] = useState(false);
 
+  // 動態資料與已鎖定時段狀態
+  const [services, setServices] = useState<ServiceItem[]>([]);
+  const [timeSlots, setTimeSlots] = useState<string[]>([]);
+  const [confirmedSlots, setConfirmedSlots] = useState<ConfirmedSlot[]>([]);
+  const [isLoadingDB, setIsLoadingDB] = useState(true);
+
   // 步驟一狀態
   const [bookingData, setBookingData] = useState<BookingInfo>({
     name: '',
@@ -82,7 +88,7 @@ export default function BookingPage() {
     lineId: '',
     birthday: '',
     isBirthdayMonth: '否',
-    service: '',
+    serviceId: '',
     isFirstTime: '是',
     date1: '',
     timeSlot1: '',
@@ -95,42 +101,53 @@ export default function BookingPage() {
     note: '',
   });
 
-  // 計算價格選單（根據是否壽星）
-  const getServiceOptions = (isBirthday: boolean) => {
-    return BASE_SERVICES.map((item) => {
-      const finalPrice = isBirthday
-        ? Math.round(item.originalPrice * 0.9)
-        : item.originalPrice;
-      const label = isBirthday
-        ? `${item.name} - 壽星價 NT$ ${finalPrice.toLocaleString()} (原價 NT$ ${item.originalPrice.toLocaleString()})`
-        : `${item.name} - NT$ ${finalPrice.toLocaleString()}`;
-      const value = `${item.name} (NT$ ${finalPrice.toLocaleString()}${isBirthday ? ' 壽星9折' : ''})`;
-      return { ...item, finalPrice, label, value };
-    });
+  // 從 Supabase 載入項目、時段以及「已確定的預約紀錄」
+  useEffect(() => {
+    async function fetchData() {
+      setIsLoadingDB(true);
+
+      const [servicesRes, slotsRes, confirmedRes] = await Promise.all([
+        supabase.from('services').select('*').eq('is_active', true),
+        supabase.from('time_slots').select('*').eq('is_active', true).order('slot_time'),
+        supabase.from('bookings').select('confirmed_date, confirmed_time_slot').eq('status', 'confirmed')
+      ]);
+
+      if (servicesRes.data && servicesRes.data.length > 0) {
+        setServices(servicesRes.data);
+        setBookingData((prev) => ({ ...prev, serviceId: servicesRes.data[0].id }));
+      }
+
+      if (slotsRes.data && slotsRes.data.length > 0) {
+        setTimeSlots(slotsRes.data.map((s) => s.slot_time));
+      }
+
+      if (confirmedRes.data) {
+        setConfirmedSlots(confirmedRes.data as ConfirmedSlot[]);
+      }
+
+      setIsLoadingDB(false);
+    }
+
+    fetchData();
+  }, []);
+
+  // 檢查某「日期 + 時段」是否已被確定預約
+  const isSlotBooked = (date: string, timeSlot: string) => {
+    if (!date || !timeSlot) return false;
+    return confirmedSlots.some(
+      (item) => item.confirmed_date === date && item.confirmed_time_slot === timeSlot
+    );
   };
 
-  const currentServiceOptions = getServiceOptions(bookingData.isBirthdayMonth === '是');
+  const activeService = services.find((s) => s.id === bookingData.serviceId);
+  const isBirthday = bookingData.isBirthdayMonth === '是';
+  const finalPrice = activeService
+    ? isBirthday
+      ? Math.round(activeService.original_price * 0.9)
+      : activeService.original_price
+    : 0;
 
-  // 當選擇壽星切換時，自動更新預約項目的顯示文字與價格
-  useEffect(() => {
-    if (!bookingData.service) {
-      setBookingData((prev) => ({ ...prev, service: currentServiceOptions[0].value }));
-      return;
-    }
-
-    // 找到當前選中的服務基礎名稱
-    const matchedService = BASE_SERVICES.find((s) => bookingData.service.includes(s.name));
-    if (matchedService) {
-      const isBirthday = bookingData.isBirthdayMonth === '是';
-      const finalPrice = isBirthday
-        ? Math.round(matchedService.originalPrice * 0.9)
-        : matchedService.originalPrice;
-      const newServiceValue = `${matchedService.name} (NT$ ${finalPrice.toLocaleString()}${isBirthday ? ' 壽星9折' : ''})`;
-      setBookingData((prev) => ({ ...prev, service: newServiceValue }));
-    }
-  }, [bookingData.isBirthdayMonth]);
-
-  // 步驟二狀態
+  // 步驟二至五狀態
   const [healthData, setHealthData] = useState<HealthInfo>({
     conditions: [],
     conditionOther: '',
@@ -142,7 +159,6 @@ export default function BookingPage() {
     scarDetail: '',
   });
 
-  // 步驟三狀態
   const [preferenceData, setPreferenceData] = useState<PreferenceInfo>({
     makeupHabit: '完全不化妝',
     makeupHabitOther: '',
@@ -152,12 +168,8 @@ export default function BookingPage() {
     colorExpectationOther: '',
   });
 
-  // 步驟四狀態
-  const [termsData, setTermsData] = useState<TermsInfo>({
-    agreed: false,
-  });
+  const [termsData, setTermsData] = useState<TermsInfo>({ agreed: false });
 
-  // 步驟五狀態
   const [consentData, setConsentData] = useState<ConsentInfo>({
     photoAgreed: true,
     signatureImage: '',
@@ -165,8 +177,6 @@ export default function BookingPage() {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const timeSlots = ['10:00', '14:00', '18:00'];
 
   const sources = [
     { label: 'Instagram', value: 'instagram' },
@@ -177,8 +187,7 @@ export default function BookingPage() {
   ];
 
   const conditionOptions = [
-    '無',
-    '懷孕', '糖尿病', '心臟病', '高血壓', '蟹足腫', '過敏體質',
+    '無', '懷孕', '糖尿病', '心臟病', '高血壓', '蟹足腫', '過敏體質',
     '每週喝酒3天以上', '賀爾蒙失調', '甲狀腺',
     '眉毛區塊皮膚疾病（毛囊炎、痘痘、濕疹、異位性皮膚炎）',
     'B型肝炎', '蕁麻疹', '貧血', '愛滋病', '癲癇', '免疫力下降',
@@ -189,28 +198,9 @@ export default function BookingPage() {
 
   const medicationOptions = ['無', '中藥', '西藥', '抗凝血藥物'];
   const productOptions = ['無', 'A酸', 'A醇', '換膚產品'];
-
-  const makeupHabitOptions = [
-    '完全不化妝',
-    '偶爾畫／經常淡妝',
-    '經常畫歐美妝／偏濃妝系',
-    '其他'
-  ];
-
-  const eyebrowShapeOptions = [
-    '不了解',
-    '有偏向的喜好（偏平／偏彎／偏挑／偏粗／偏細）',
-    '有喜歡的風格（日常／溫柔／自然／韓系／歐美）',
-    '其他'
-  ];
-
-  const colorExpectationOptions = [
-    '喜歡淡淡的感覺，最好不要被發現！',
-    '喜歡偏自然，平常可以自己掃眉粉',
-    '喜歡妝感眉型',
-    '喜歡比較深一點',
-    '其他'
-  ];
+  const makeupHabitOptions = ['完全不化妝', '偶爾畫／經常淡妝', '經常畫歐美妝／偏濃妝系', '其他'];
+  const eyebrowShapeOptions = ['不了解', '有偏向的喜好（偏平／偏彎／偏挑／偏粗／偏細）', '有喜歡的風格（日常／溫柔／自然／韓系／歐美）', '其他'];
+  const colorExpectationOptions = ['喜歡淡淡的感覺，最好不要被發現！', '喜歡偏自然，平常可以自己掃眉粉', '喜歡妝感眉型', '喜歡比較深一點', '其他'];
 
   const handleBookingChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -250,11 +240,19 @@ export default function BookingPage() {
     setTimeout(() => setCopiedLine(false), 2000);
   };
 
+  // 提交寫入 Supabase
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (sigCanvas.current?.isEmpty()) {
       alert('請完成線上簽名後再送出預約！');
+      return;
+    }
+
+    // 防護驗證：確認選擇的第一順位未被預約
+    if (isSlotBooked(bookingData.date1, bookingData.timeSlot1)) {
+      alert(`抱歉，${bookingData.date1} ${bookingData.timeSlot1} 剛剛已被預約，請選擇其他時段！`);
+      setStep(1);
       return;
     }
 
@@ -264,28 +262,77 @@ export default function BookingPage() {
 
     setIsSubmitting(true);
 
-    const finalPayload = {
-      booking: bookingData,
-      health: healthData,
-      preference: preferenceData,
-      termsAgreed: termsData.agreed,
-      consent: {
-        ...consentData,
-        signatureImage: signatureBase64,
-      },
-    };
+    try {
+      const { error } = await supabase.from('bookings').insert([
+        {
+          name: bookingData.name,
+          phone: bookingData.phone,
+          line_id: bookingData.lineId,
+          birthday: bookingData.birthday,
+          is_birthday_month: isBirthday,
+          service_id: bookingData.serviceId,
+          service_name: activeService?.name || '',
+          final_price: finalPrice,
+          is_first_time: bookingData.isFirstTime === '是',
+          date1: bookingData.date1,
+          time_slot1: bookingData.timeSlot1,
+          date2: bookingData.date2 || null,
+          time_slot2: bookingData.timeSlot2 || null,
+          date3: bookingData.date3 || null,
+          time_slot3: bookingData.timeSlot3 || null,
+          source: bookingData.source,
+          source_detail: bookingData.sourceDetail || null,
+          note: bookingData.note || null,
+          
+          // 初始狀態為待確認，待店家確定最終日期
+          status: 'pending',
+          confirmed_date: null,
+          confirmed_time_slot: null,
 
-    console.log('完整預約、健康評估與線上簽名資料:', finalPayload);
+          // 健康與意向
+          health_conditions: healthData.conditions,
+          health_condition_other: healthData.conditionOther || null,
+          medications: healthData.medications,
+          medication_other: healthData.medicationOther || null,
+          eyebrow_products: healthData.eyebrowProducts,
+          product_other: healthData.productOther || null,
+          has_scar: healthData.hasScar,
+          scar_detail: healthData.scarDetail || null,
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+          makeup_habit: preferenceData.makeupHabit,
+          makeup_habit_other: preferenceData.makeupHabitOther || null,
+          eyebrow_shape: preferenceData.eyebrowShape,
+          eyebrow_shape_other: preferenceData.eyebrowShapeOther || null,
+          color_expectation: preferenceData.colorExpectation,
+          color_expectation_other: preferenceData.colorExpectationOther || null,
 
-    setIsSubmitting(false);
-    setStep(6);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+          // 同意書與簽名
+          terms_agreed: termsData.agreed,
+          photo_agreed: consentData.photoAgreed,
+          signature_image: signatureBase64,
+          signed_date: consentData.signedDate,
+        },
+      ]);
+
+      if (error) throw error;
+
+      setStep(6);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err: any) {
+      console.error('寫入 Supabase 失敗:', err);
+      alert(`預約失敗：${err.message || '請重新嘗試'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  // 當前選中的服務說明卡片
-  const activeServiceInfo = currentServiceOptions.find((s) => bookingData.service.includes(s.name));
+  if (isLoadingDB) {
+    return (
+      <main className="min-h-screen bg-[#F4F7F4] flex items-center justify-center">
+        <p className="text-[#5B7B5E] text-sm font-medium animate-pulse">正在同步最新可預約時段...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#F4F7F4] py-12 px-4 sm:px-6 lg:px-8 font-sans">
@@ -322,7 +369,7 @@ export default function BookingPage() {
           </div>
         )}
 
-        {/* ================= 步驟一：預約資訊 (包含動態壽星 9 折) ================= */}
+        {/* ================= 步驟一：預約資訊 (含自動避開已額滿時段) ================= */}
         {step === 1 && (
           <form
             onSubmit={(e) => {
@@ -384,7 +431,6 @@ export default function BookingPage() {
                 </div>
               </div>
 
-              {/* 生日與當月壽星優惠勾選 */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
                 <div>
                   <label className="block text-xs font-medium text-[#4A574B] mb-1.5">
@@ -432,7 +478,6 @@ export default function BookingPage() {
               </div>
             </div>
 
-            {/* 2. 預約內容選擇與動態價目 */}
             <div className="space-y-4 pt-2">
               <h2 className="text-sm font-semibold text-[#5B7B5E] border-b border-[#E2EBE2] pb-1.5 mb-3">
                 2. 預約項目選擇與價目
@@ -443,40 +488,38 @@ export default function BookingPage() {
                   預約項目 <span className="text-red-400">*</span>
                 </label>
                 <select
-                  name="service"
-                  value={bookingData.service}
+                  name="serviceId"
+                  value={bookingData.serviceId}
                   onChange={handleBookingChange}
                   className="w-full px-4 py-2.5 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-[#2D3B2E] text-sm focus:ring-2 focus:ring-[#8BA88D] outline-none"
                 >
-                  {currentServiceOptions.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
+                  {services.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} - NT$ {isBirthday ? Math.round(item.original_price * 0.9).toLocaleString() : item.original_price.toLocaleString()}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* 展示服務詳情與當前結算價格 */}
-              {activeServiceInfo && (
+              {activeService && (
                 <div className="p-3 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] text-xs text-[#687869] space-y-1">
                   <div className="flex justify-between items-center border-b border-[#E2EBE2] pb-1">
-                    <p className="font-semibold text-[#5B7B5E]">✨ {activeServiceInfo.name}</p>
+                    <p className="font-semibold text-[#5B7B5E]">✨ {activeService.name}</p>
                     <p className="font-bold text-[#2D3B2E]">
-                      {bookingData.isBirthdayMonth === '是' ? (
+                      {isBirthday ? (
                         <>
-                          <span className="line-through text-gray-400 mr-1.5">NT$ {activeServiceInfo.originalPrice.toLocaleString()}</span>
-                          <span className="text-red-600 font-extrabold">壽星價 NT$ {activeServiceInfo.finalPrice.toLocaleString()}</span>
+                          <span className="line-through text-gray-400 mr-1.5">NT$ {activeService.original_price.toLocaleString()}</span>
+                          <span className="text-red-600 font-extrabold">壽星價 NT$ {finalPrice.toLocaleString()}</span>
                         </>
                       ) : (
-                        `NT$ ${activeServiceInfo.finalPrice.toLocaleString()}`
+                        `NT$ ${finalPrice.toLocaleString()}`
                       )}
                     </p>
                   </div>
-                  <p className="pt-1">{activeServiceInfo.note}</p>
+                  <p className="pt-1">{activeService.note}</p>
                 </div>
               )}
 
-              {/* 是否第一次體驗 */}
               <div className="p-4 rounded-xl bg-[#F0F5F0] border border-[#D8E5D9]">
                 <label className="block text-xs font-medium text-[#3D4D3E] mb-2">
                   是否為第一次體驗紋繡/飄眉服務？ <span className="text-red-400">*</span>
@@ -513,6 +556,7 @@ export default function BookingPage() {
                 3. 預約時間順位
               </h2>
 
+              {/* 第一順位 */}
               <div className="p-4 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] space-y-3">
                 <span className="text-xs font-semibold text-[#5B7B5E] bg-[#E8F0E8] px-2.5 py-1 rounded-md inline-block">
                   第一順位 (必填) *
@@ -534,13 +578,19 @@ export default function BookingPage() {
                     className="w-full px-3.5 py-2 rounded-lg bg-white border border-[#DCE4DC] text-[#2D3B2E] text-sm outline-none"
                   >
                     <option value="" disabled>請選擇時段</option>
-                    {timeSlots.map((slot) => (
-                      <option key={slot} value={slot}>{slot}</option>
-                    ))}
+                    {timeSlots.map((slot) => {
+                      const booked = isSlotBooked(bookingData.date1, slot);
+                      return (
+                        <option key={slot} value={slot} disabled={booked}>
+                          {slot} {booked ? '❌ (已被預約)' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>
 
+              {/* 第二順位 */}
               <div className="p-4 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] space-y-3">
                 <span className="text-xs font-medium text-[#7A8A7B] bg-[#F0F4F0] px-2.5 py-1 rounded-md inline-block">
                   第二順位 (選填)
@@ -561,13 +611,19 @@ export default function BookingPage() {
                     className="w-full px-3.5 py-2 rounded-lg bg-white border border-[#DCE4DC] text-[#2D3B2E] text-sm outline-none"
                   >
                     <option value="" disabled>請選擇時段</option>
-                    {timeSlots.map((slot) => (
-                      <option key={slot} value={slot}>{slot}</option>
-                    ))}
+                    {timeSlots.map((slot) => {
+                      const booked = isSlotBooked(bookingData.date2, slot);
+                      return (
+                        <option key={slot} value={slot} disabled={booked}>
+                          {slot} {booked ? '❌ (已被預約)' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>
 
+              {/* 第三順位 */}
               <div className="p-4 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC] space-y-3">
                 <span className="text-xs font-medium text-[#7A8A7B] bg-[#F0F4F0] px-2.5 py-1 rounded-md inline-block">
                   第三順位 (選填)
@@ -588,9 +644,14 @@ export default function BookingPage() {
                     className="w-full px-3.5 py-2 rounded-lg bg-white border border-[#DCE4DC] text-[#2D3B2E] text-sm outline-none"
                   >
                     <option value="" disabled>請選擇時段</option>
-                    {timeSlots.map((slot) => (
-                      <option key={slot} value={slot}>{slot}</option>
-                    ))}
+                    {timeSlots.map((slot) => {
+                      const booked = isSlotBooked(bookingData.date3, slot);
+                      return (
+                        <option key={slot} value={slot} disabled={booked}>
+                          {slot} {booked ? '❌ (已被預約)' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>
@@ -658,7 +719,7 @@ export default function BookingPage() {
           </form>
         )}
 
-        {/* ================= 步驟二：顧客身體狀況詢問 ================= */}
+        {/* 步驟二至六保持不變 ... */}
         {step === 2 && (
           <form
             onSubmit={(e) => {
@@ -810,7 +871,6 @@ export default function BookingPage() {
           </form>
         )}
 
-        {/* ================= 步驟三：顧客意向詢問 ================= */}
         {step === 3 && (
           <form
             onSubmit={(e) => {
@@ -892,7 +952,7 @@ export default function BookingPage() {
               <label className="block text-xs font-semibold text-[#2D3B2E]">
                 3. 對留色的期待 <span className="text-red-400">*</span>
               </label>
-              <div className="space-y-2 p-3.5 rounded-xl bg-[#FAFBF9] border border-[#DCE4DC]">
+              <div className="space-y-2 p-[#FAFBF9] border border-[#DCE4DC] p-3.5 rounded-xl">
                 {colorExpectationOptions.map((option) => (
                   <label key={option} className="flex items-center gap-2.5 text-xs text-[#4A574B] cursor-pointer hover:text-[#2D3B2E]">
                     <input
@@ -937,7 +997,6 @@ export default function BookingPage() {
           </form>
         )}
 
-        {/* ================= 步驟四：須知事項 ================= */}
         {step === 4 && (
           <form
             onSubmit={(e) => {
@@ -1012,7 +1071,6 @@ export default function BookingPage() {
           </form>
         )}
 
-        {/* ================= 步驟五：紋繡服務同意書與線上簽名 ================= */}
         {step === 5 && (
           <form onSubmit={handleSubmit} className="space-y-6">
             <h2 className="text-sm font-semibold text-[#5B7B5E] border-b border-[#E2EBE2] pb-1.5 mb-2">
@@ -1026,7 +1084,7 @@ export default function BookingPage() {
 
               <section>
                 <h3 className="font-bold text-[#2D3B2E] mb-1">一、本服務無法達到的效果</h3>
-                <p>本服務不在治療、矯正、預防關於皮膚、身體結構及生理組織疾病，若您有疾病、傷害或殘缺，請盡早與您的醫生聯繫預約就診。</p>
+                <p>本服務不在治療、矯正、預防關於皮膚、身體結構及生理組織疾病，若您有疾病、傷害或殘缺，請盡早與您的醫師聯繫預約就診。</p>
               </section>
 
               <section>
@@ -1123,7 +1181,7 @@ export default function BookingPage() {
           </form>
         )}
 
-        {/* ================= 步驟六：預約成功 ================= */}
+        {/* 步驟六：預約成功 */}
         {step === 6 && (
           <div className="text-center py-4 space-y-6">
             <div className="w-16 h-16 bg-[#E8F0E8] text-[#5B7B5E] rounded-full flex items-center justify-center mx-auto text-3xl font-semibold shadow-inner">
@@ -1137,15 +1195,14 @@ export default function BookingPage() {
               </p>
             </div>
 
-            {/* 預約摘要 */}
             <div className="bg-[#FAFBF9] p-4 rounded-2xl border border-[#DCE4DC] text-left max-w-md mx-auto text-xs space-y-2">
               <p className="font-semibold text-[#5B7B5E] border-b border-[#E2EBE2] pb-1">預約摘要</p>
-              <p><span className="text-[#7A8A7B]">預約項目：</span>{bookingData.service}</p>
-              <p><span className="text-[#7A8A7B]">當月壽星：</span>{bookingData.isBirthdayMonth === '是' ? '🎂 是 (已套用 9 折優惠)' : '否'}</p>
+              <p><span className="text-[#7A8A7B]">預約項目：</span>{activeService?.name}</p>
+              <p><span className="text-[#7A8A7B]">預約費用：</span>NT$ {finalPrice.toLocaleString()}</p>
+              <p><span className="text-[#7A8A7B]">當月壽星：</span>{isBirthday ? '🎂 是 (已套用 9 折優惠)' : '否'}</p>
               <p><span className="text-[#7A8A7B]">首選日期/時段：</span>{bookingData.date1} {bookingData.timeSlot1}</p>
             </div>
 
-            {/* 社群聯絡與追蹤卡片 */}
             <div className="bg-[#F0F5F0] p-6 rounded-2xl border border-[#D8E5D9] max-w-md mx-auto space-y-4">
               <div className="space-y-1">
                 <span className="text-[11px] font-bold tracking-wider text-[#5B7B5E] uppercase bg-white px-2.5 py-1 rounded-full inline-block border border-[#D8E5D9]">
@@ -1157,20 +1214,15 @@ export default function BookingPage() {
                 </p>
               </div>
 
-              {/* 加入 LINE 按鈕 */}
               <a
                 href={OFFICIAL_LINE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full py-3.5 px-4 bg-[#06C755] hover:bg-[#05b34c] text-white font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 text-sm"
               >
-                <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                  <path d="M19.365 9.863c.349.0.63.285.63.631.0.345-.281.63-.63.63H17.61v1.125h1.755c.349.0.63.283.63.63.0.344-.281.629-.63.629h-2.386c-.345.0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346.0.627.285.627.63.0.349-.281.63-.63.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211.0-.416-.105-.537-.289l-2.494-3.676v3.305c0 .348-.282.63-.63.63-.348.0-.63-.282-.63-.63V8.108c0-.27.174-.51.432-.596.063-.021.132-.031.198-.031.211.0.417.105.538.288l2.493 3.676V8.108c0-.345.282-.63.63-.63.348.0.63.285.63.63v4.771zm-6.839.0c0 .348-.282.63-.63.63-.349.0-.63-.282-.63-.63V8.108c0-.345.281-.63.63-.63.348.0.63.285.63.63v4.771zm-2.541.0H3.743c-.349.0-.63-.282-.63-.63V8.108c0-.345.281-.63.63-.63.349.0.63.285.63.63v4.141h1.756c.348.0.629.283.629.63.0.344-.282.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943.0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/>
-                </svg>
                 加入 LINE 官方帳號
               </a>
 
-              {/* 複製 LINE ID 備用 */}
               <div className="pt-1 flex items-center justify-center gap-2 text-xs text-[#687869]">
                 <span>LINE ID：<strong className="text-[#2D3B2E]">{OFFICIAL_LINE_ID}</strong></span>
                 <button
@@ -1182,7 +1234,6 @@ export default function BookingPage() {
                 </button>
               </div>
 
-              {/* 追蹤 Instagram 區塊 */}
               <div className="pt-4 border-t border-[#D8E5D9]">
                 <p className="text-xs text-[#687869] mb-2.5">
                   觀看更多作品集與最新動態：
@@ -1193,9 +1244,6 @@ export default function BookingPage() {
                   rel="noopener noreferrer"
                   className="w-full py-3 px-4 bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#F77737] hover:opacity-95 text-white font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 text-sm"
                 >
-                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                  </svg>
                   追蹤 Instagram：@{INSTAGRAM_HANDLE}
                 </a>
               </div>
